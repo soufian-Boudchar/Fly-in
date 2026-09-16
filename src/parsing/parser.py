@@ -1,22 +1,19 @@
-import os
-import sys
-from typing import List, Dict, Optional
+from typing import List, Dict, Any
 import re
-from collections import Counter
-from ..classes import Zone, Connection
+from src.classes import Zone, Connection
 
 
 class ConfigParser:
 
-    def __init__(self, argv: str) -> None:
-        self.argv = argv
-        self.nb_drones = 0
+    def __init__(self, argv: List[str]) -> None:
+        self.argv: List[str] = argv
+        self.nb_drones: int = 0
         self.zones: Dict[str, Zone] = {}
         self.connections: List[Connection] = []
-        self.start_hub: Optional[str] = None
-        self.end_hub: Optional[str] = None
-        self.current_mode: None | str = None
-        self.finished_keys = {
+        self.start_hub: Zone = Zone("None", 1, 1)
+        self.end_hub: Zone = Zone("None", 1, 1)
+        self.current_mode: None | str | int = None
+        self.finished_keys: Dict[str, bool] = {
             "nb_drones": False,
             "start_hub": False,
             "hub": False,
@@ -25,17 +22,19 @@ class ConfigParser:
         }
 
     @property
-    def get_file_content_lines(self):
+    def get_file_content_lines(self) -> List[str]:
         try:
             with open(self.argv[1], "r") as file:
                 content = file.read()
                 if not content.strip():
-                    raise ValueError("\033[31m[ERROR]\033[0m The file is empty!")
+                    raise ValueError(
+                        "\033[31m[ERROR]\033[0m The file is empty!")
         except IndexError:
-            raise ValueError(f"\033[31m[ERROR]\033[0m File not found!")
-        content = content.splitlines()
-        content.append("EOF")
-        return content
+            raise ValueError("\033[31m[ERROR]\033[0m Missing input file!")
+
+        lines: List[str] = content.splitlines()
+        lines.append("EOF")
+        return lines
 
     @property
     def check_order(self) -> int:
@@ -50,7 +49,7 @@ class ConfigParser:
             order += 1
         return 0
 
-    def char_counter(self, line: str, char: str):
+    def char_counter(self, line: str, char: str) -> int:
         count = 0
         for i in line:
             if i == char:
@@ -82,7 +81,8 @@ class ConfigParser:
         else:
             return -1
 
-    def substring_between(self, line: str, start, end):
+    def substring_between(self, line: str, start: int | str,
+                          end: int | str) -> str:
         if isinstance(start, str):
             i_start = line.index(start[-1])
         elif isinstance(start, int):
@@ -95,13 +95,11 @@ class ConfigParser:
 
         return line[i_start + 1:i_end]
 
-    def zone_validator(self, zone: str):
+    def zone_validator(self, zone: str) -> int:
         valid_types = ["normal", "blocked", "restricted", "priority"]
         if zone not in valid_types:
             return -5
         return 0
-
-
 
     def get_nb_drones(self, line: str) -> int:
         # return -1: duplicate nb_drones
@@ -121,11 +119,15 @@ class ConfigParser:
             return -3
 
     def get_hub(self, line: str) -> Zone | int:
-
+        blocked = False
         if not self.finished_keys['nb_drones']:
             return -1
-        metadata = {"zone": "normal", "color": "none", "max_drones": 1}
-        hub_info = {}
+        metadata: Dict[str, str] = {
+            "zone": "normal",
+            "color": "none",
+            "max_drones": "1"
+        }
+        hub_info: Dict[str, Any] = {}
 
         if '[' in line or ']' in line:
             if not (self.char_counter(line, '[') == 1
@@ -150,8 +152,11 @@ class ConfigParser:
 
                 metadata[key] = value
             try:
-                metadata['max_drones'] = int(metadata['max_drones'])
-                if metadata['max_drones'] <= 0:
+
+                max_drones = int(metadata['max_drones'])
+                if max_drones == "0":
+                    blocked = True
+                elif max_drones < 0:
                     raise ValueError
             except ValueError:
                 return -5
@@ -179,13 +184,14 @@ class ConfigParser:
 
         if self.zone_validator(metadata['zone']) == -5:
             return -5
-        zone = Zone(hub_info['name'], hub_info['x'], hub_info['y'],
-                    metadata['zone'], metadata['color'],
-                    metadata['max_drones'])
+        if blocked:
+            metadata['zone'] = 'BLOCKED'
 
+        zone = Zone(hub_info['name'], hub_info['x'], hub_info['y'],
+                    metadata['zone'], metadata['color'], max_drones)
         return zone
 
-    def get_connection(self, line: str):
+    def get_connection(self, line: str) -> Connection | int:
 
         # return -1: duplicate start_hub
         # return -3: invalid metadata syntax
@@ -193,10 +199,11 @@ class ConfigParser:
         # return -5: invalid metadata value
         # retrun -8: invalid zone name
         # return -9: invalid connection syntax
+        blocked = False
         if self.finished_keys['connection']:
             return -1
-        metadata = {'max_link_capacity': 1}
-
+        metadata: Dict[str, str] = {'max_link_capacity': "1"}
+        max_link_capacity = 1
         if '[' in line or ']' in line:
             if not (self.char_counter(line, '[') == 1
                     and self.char_counter(line, ']') == 1):
@@ -221,9 +228,11 @@ class ConfigParser:
 
                 metadata[key] = value
             try:
-                metadata['max_link_capacity'] = int(
-                    metadata['max_link_capacity'])
-                if metadata['max_link_capacity'] <= 0:
+                max_link_capacity = int(metadata['max_link_capacity'])
+
+                if max_link_capacity == 0:
+                    blocked = True
+                elif max_link_capacity < 0:
                     raise ValueError
             except ValueError:
                 return -5
@@ -239,26 +248,25 @@ class ConfigParser:
         zone1_name, zone2_name = data[0].split('-')
 
         try:
-
             zone1 = self.zones[zone1_name]
             zone2 = self.zones[zone2_name]
         except KeyError:
             return -8
 
-        return Connection(zone1, zone2, metadata['max_link_capacity'])
+        if blocked:
+            self.zones[zone2_name].type = "BLOCKED"
+        return Connection(zone1, zone2, max_link_capacity)
 
-    def error_raiser(self, line_num: int, error_num: int):
+    def error_raiser(self, line_num: int, error_num: int | Zone) -> None:
         if error_num == -1:
-            raise ValueError(
-                f"\033[31m[Line {line_num + 1}]\033[0m Unexpected or duplicate key."
-            )
+            raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                             "Unexpected or duplicate key.")
         elif error_num == -2:
             raise ValueError(
                 f"\033[31m[Line {line_num + 1}]\033[0m Invalid hub format!")
         elif error_num == -3:
-            raise ValueError(
-                f"\033[31m[Line {line_num + 1}]\033[0m Invalid metadata syntax!"
-            )
+            raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                             "Invalid metadata syntax!")
         elif error_num == -4:
             raise ValueError(
                 f"\033[31m[Line {line_num + 1}]\033[0m Invalid metadata key!")
@@ -276,9 +284,8 @@ class ConfigParser:
             raise ValueError(
                 f"\033[31m[Line {line_num + 1}]\033[0m Invalid zone name")
         elif error_num == -9:
-            raise ValueError(
-                f"\033[31m[Line {line_num + 1}]\033[0m Invalid connection syntax"
-            )
+            raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                             "Invalid connection syntax")
 
         elif error_num == -10:
             raise ValueError(
@@ -291,8 +298,7 @@ class ConfigParser:
             raise ValueError(
                 f"\033[31m[Line {line_num + 1}]\033[0m Duplicate connection")
 
-
-    def check_zone_duplicate(self, zone: Zone):
+    def check_zone_duplicate(self, zone: Zone) -> int:
         for z in self.zones.values():
             if z.x == zone.x and z.y == zone.y:
                 return -10
@@ -300,7 +306,7 @@ class ConfigParser:
                 return -11
         return 0
 
-    def parse(self):
+    def parse(self) -> None:
         conns_names = []
         content_lines = self.get_file_content_lines
         for line_num, line in enumerate(content_lines):
@@ -318,13 +324,11 @@ class ConfigParser:
             if self.current_mode == -1 or self.check_order == -1:
                 self.error_raiser(line_num, -1)
             elif ":" not in line:
-                raise ValueError(
-                    f"\033[31m[Line {line_num + 1}]\033[0m Invalid line: ':' is missing."
-                )
+                raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                                 "Invalid line: ':' is missing.")
             elif self.char_counter(line, ':') != 1:
-                raise ValueError(
-                    f"\033[31m[Line {line_num + 1}]\033[0m Invalid line: expected exactly one ':'."
-                )
+                raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                                 "Invalid line: expected exactly one ':'.")
 
             if self.current_mode == "nb_drones":
                 # return -1: duplicate nb_drones
@@ -332,23 +336,24 @@ class ConfigParser:
                 # return -3: invalid nb_drones value
                 self.nb_drones = self.get_nb_drones(line)
                 if self.nb_drones == -1:
-                    raise ValueError(
-                        f"\033[31m[Line {line_num + 1}]\033[0m Unexpected or duplicate key."
-                    )
+                    raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                                     "Unexpected or duplicate key.")
                 elif self.nb_drones == -2:
-                    raise ValueError(
-                        f"\033[31m[Line {line_num + 1}]\033[0m Invalid nb_drones format!"
-                    )
+                    raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                                     "Invalid nb_drones format!")
                 elif self.nb_drones == -3:
-                    raise ValueError(
-                        f"\033[31m[Line {line_num + 1}]\033[0m Invalid nb_drones value!"
-                    )
+                    raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                                     "Invalid nb_drones value!")
                 self.finished_keys['nb_drones'] = True
 
-            elif self.current_mode == "start_hub" or self.current_mode == "hub" or self.current_mode == "end_hub":
-                zone = self.get_hub(line)
+            elif (self.current_mode == "start_hub"
+                  or self.current_mode == "hub"
+                  or self.current_mode == "end_hub"):
 
-                if isinstance(zone, Zone) and zone.name:
+                zone = self.get_hub(line)
+                if isinstance(zone, Zone):
+                    if not zone.name:
+                        self.error_raiser(line_num, -3)
 
                     if self.check_zone_duplicate(zone) == -10:
                         self.error_raiser(line_num, -10)
@@ -366,9 +371,8 @@ class ConfigParser:
 
             elif self.current_mode == 'connection':
                 if self.char_counter(line, '-') != 1:
-                    raise ValueError(
-                        f"\033[31m[Line {line_num + 1}]\033[0m Invalid connection syntax"
-                    )
+                    raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
+                                     "Invalid connection syntax")
                 conn = self.get_connection(line)
                 if isinstance(conn, Connection):
                     if conn.zone1.name == conn.zone2.name:
@@ -386,4 +390,4 @@ class ConfigParser:
         for key, val in self.finished_keys.items():
             if key != 'hub' and key != 'connection' and not val:
                 raise ValueError(
-                    f"\033[31m[ERROR]\033[0m Missing required key!")
+                    "\033[31m[ERROR]\033[0m Missing required key!")
