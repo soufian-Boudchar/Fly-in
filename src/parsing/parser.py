@@ -4,8 +4,25 @@ from src.classes import Zone, Connection
 
 
 class ConfigParser:
+    """Parses and validates configuration files for drone simulation setup.
+
+    Attributes:
+        argv (List[str]): Command-line arguments containing file path.
+        nb_drones (int): Total number of drones parsed from input file.
+        zones (Dict[str, Zone]): Mapping of zone names to Zone objects.
+        connections (List[Connection]): List of parsed Connection objects.
+        start_hub (Zone): Designated starting zone instance.
+        end_hub (Zone): Designated destination zone instance.
+        current_mode (None | str | int): Active parsing section context.
+        finished_keys (Dict[str, bool]): Tracking map for parsed sections.
+    """
 
     def __init__(self, argv: List[str]) -> None:
+        """Initializes ConfigParser with command-line arguments.
+
+        Args:
+            argv (List[str]): Command-line argument vector.
+        """
         self.argv: List[str] = argv
         self.nb_drones: int = 0
         self.zones: Dict[str, Zone] = {}
@@ -23,6 +40,16 @@ class ConfigParser:
 
     @property
     def get_file_content_lines(self) -> List[str]:
+        """Reads target configuration file content
+        into a list of line strings.
+
+        Returns:
+            List[str]: Content lines with 'EOF' sentinel appended.
+
+        Raises:
+            ValueError: If file path argument is
+            missing or target file is empty.
+        """
         try:
             with open(self.argv[1], "r") as file:
                 content = file.read()
@@ -38,6 +65,11 @@ class ConfigParser:
 
     @property
     def check_order(self) -> int:
+        """Validates sequential section ordering within configuration file.
+
+        Returns:
+            int: 0 if section order is valid, -1 if order sequence is violated.
+        """
         order = 1
         for key, finished in self.finished_keys.items():
             if not finished:
@@ -50,6 +82,15 @@ class ConfigParser:
         return 0
 
     def char_counter(self, line: str, char: str) -> int:
+        """Counts occurrences of a specific character in target string.
+
+        Args:
+            line (str): Target input string.
+            char (str): Character to count.
+
+        Returns:
+            int: Number of occurrences found.
+        """
         count = 0
         for i in line:
             if i == char:
@@ -57,6 +98,15 @@ class ConfigParser:
         return count
 
     def mode_selecter(self, line: str) -> str | int:
+        """Identifies parsing section keyword present in configuration line.
+
+        Args:
+            line (str): Raw input line.
+
+        Returns:
+            str | int: Section name string if
+            matched, or -1 if line header is invalid.
+        """
         if re.match(r"^nb_drones\s*:",
                     line) and not self.finished_keys['nb_drones']:
             return "nb_drones"
@@ -83,6 +133,17 @@ class ConfigParser:
 
     def substring_between(self, line: str, start: int | str,
                           end: int | str) -> str:
+        """Extracts substring contained
+        between specified start and end markers.
+
+        Args:
+            line (str): Source string.
+            start (int | str): Starting index or character marker.
+            end (int | str): Ending index or character marker.
+
+        Returns:
+            str: Extracted substring segment.
+        """
         if isinstance(start, str):
             i_start = line.index(start[-1])
         elif isinstance(start, int):
@@ -96,15 +157,29 @@ class ConfigParser:
         return line[i_start + 1:i_end]
 
     def zone_validator(self, zone: str) -> int:
+        """Validates functional type string for zone definitions.
+
+        Args:
+            zone (str): Zone type identifier.
+
+        Returns:
+            int: 0 if valid, -5 if type is unrecognized.
+        """
         valid_types = ["normal", "blocked", "restricted", "priority"]
         if zone not in valid_types:
             return -5
         return 0
 
     def get_nb_drones(self, line: str) -> int:
-        # return -1: duplicate nb_drones
-        # return -2: invalid nb_drones syntax
-        # return -3: invalid nb_drones value
+        """Parses drone count directive line.
+
+        Args:
+            line (str): Input directive line string.
+
+        Returns:
+            int: Parsed drone count
+            value, or negative status error code (-1, -2, -3).
+        """
         if self.finished_keys['nb_drones']:
             return -1
 
@@ -119,7 +194,17 @@ class ConfigParser:
             return -3
 
     def get_hub(self, line: str) -> Zone | int:
+        """Parses hub or zone definition line with optional metadata brackets.
+
+        Args:
+            line (str): Raw zone definition line.
+
+        Returns:
+            Zone | int: Constructed Zone instance
+            or negative status error code.
+        """
         blocked = False
+        max_drones = 1
         if not self.finished_keys['nb_drones']:
             return -1
         metadata: Dict[str, str] = {
@@ -133,13 +218,10 @@ class ConfigParser:
             if not (self.char_counter(line, '[') == 1
                     and self.char_counter(line, ']') == 1):
                 return -3
-            # get metadata from line
             variables = self.substring_between(line, '[', ']').split()
-            # check if string has more '=' chars
             if self.char_counter(line, '=') != len(variables):
                 return -3
 
-            # check if string has no '='
             for var in variables:
                 if '=' not in var or '#' in var:
                     return -3
@@ -192,14 +274,15 @@ class ConfigParser:
         return zone
 
     def get_connection(self, line: str) -> Connection | int:
+        """Parses connection link definition line with capacity metadata.
 
-        # return -1: duplicate start_hub
-        # return -3: invalid metadata syntax
-        # return -4: invalid metadata key
-        # return -5: invalid metadata value
-        # retrun -8: invalid zone name
-        # return -9: invalid connection syntax
-        blocked = False
+        Args:
+            line (str): Raw connection definition line.
+
+        Returns:
+            Connection | int: Constructed Connection
+            object or negative error code.
+        """
         if self.finished_keys['connection']:
             return -1
         metadata: Dict[str, str] = {'max_link_capacity': "1"}
@@ -209,13 +292,10 @@ class ConfigParser:
                     and self.char_counter(line, ']') == 1):
 
                 return -3
-            # get metadata from line
             variables = self.substring_between(line, '[', ']').split()
-            # check if string has more '=' chars
             if self.char_counter(line, '=') != len(variables):
                 return -3
 
-            # check if string has no '='
             for var in variables:
                 if '=' not in var or '#' in var:
                     return -3
@@ -230,9 +310,7 @@ class ConfigParser:
             try:
                 max_link_capacity = int(metadata['max_link_capacity'])
 
-                if max_link_capacity == 0:
-                    blocked = True
-                elif max_link_capacity < 0:
+                if max_link_capacity < 0:
                     raise ValueError
             except ValueError:
                 return -5
@@ -253,11 +331,18 @@ class ConfigParser:
         except KeyError:
             return -8
 
-        if blocked:
-            self.zones[zone2_name].type = "BLOCKED"
         return Connection(zone1, zone2, max_link_capacity)
 
     def error_raiser(self, line_num: int, error_num: int | Zone) -> None:
+        """Raises formatted syntax/semantic ValueError matching status code.
+
+        Args:
+            line_num (int): Zero-indexed file line number where error occurred.
+            error_num (int | Zone): Error code value.
+
+        Raises:
+            ValueError: Descriptive syntax or semantic error message.
+        """
         if error_num == -1:
             raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "
                              "Unexpected or duplicate key.")
@@ -299,6 +384,16 @@ class ConfigParser:
                 f"\033[31m[Line {line_num + 1}]\033[0m Duplicate connection")
 
     def check_zone_duplicate(self, zone: Zone) -> int:
+        """Checks for duplicate zone names
+        or overlapping spatial coordinates.
+
+        Args:
+            zone (Zone): Zone object to evaluate.
+
+        Returns:
+            int: 0 if unique, -10 for coordinate
+            overlap, -11 for name duplication.
+        """
         for z in self.zones.values():
             if z.x == zone.x and z.y == zone.y:
                 return -10
@@ -307,6 +402,13 @@ class ConfigParser:
         return 0
 
     def parse(self) -> None:
+        """Executes full parsing loop over
+        input file and populates parser state.
+
+        Raises:
+            ValueError: If file structure,
+            section syntax, or key presence is invalid.
+        """
         conns_names = []
         content_lines = self.get_file_content_lines
         for line_num, line in enumerate(content_lines):
@@ -331,9 +433,6 @@ class ConfigParser:
                                  "Invalid line: expected exactly one ':'.")
 
             if self.current_mode == "nb_drones":
-                # return -1: duplicate nb_drones
-                # return -2: invalid nb_drones syntax
-                # return -3: invalid nb_drones value
                 self.nb_drones = self.get_nb_drones(line)
                 if self.nb_drones == -1:
                     raise ValueError(f"\033[31m[Line {line_num + 1}]\033[0m "

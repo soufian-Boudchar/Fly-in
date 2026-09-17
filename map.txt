@@ -1,0 +1,35 @@
+nb_drones: 20
+start_hub: hub 0 0 [color=green]
+end_hub: goal 10 0 [color=yellow]
+hub: roof1 0 5 [zone=normal color=red]
+hub: roof2 10 10 [zone=restricted color=red]
+hub: corridorA 5 5 [zone=blocked color=green max_drones=2]
+hub: roof3 0 10 [zone=normal color=red]
+hub: roof4 5 0
+hub: roof5 10 5
+hub: roof6 5 10
+
+
+
+connection: hub-corridorA
+connection: corridorA-roof2
+connection: roof3-corridorA
+connection: corridorA-goal
+
+connection: roof1-roof4
+connection: roof1-roof6
+connection: roof6-roof5
+connection: roof4-roof5
+connection: roof4-roof3
+connection: roof4-roof2
+connection: hub-roof6
+connection: goal-roof6
+
+connection: goal-roof1
+connection: roof1-roof2
+
+connection: hub-roof5
+connection: roof5-roof3
+
+connection: roof4-roof6
+connection: roof1-roof5
